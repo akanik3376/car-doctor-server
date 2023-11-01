@@ -122,10 +122,12 @@ async function run() {
 
             if (req.query?.email) {
                 query = { email: req.query.email }
+                const result = await bookingCollection.find(query).toArray()
+                res.send(result)
             }
 
-            const result = await bookingCollection.find(query).toArray()
-            res.send(result)
+            // const result = await bookingCollection.find(query).toArray()
+            // res.send(result)
         })
 
         app.post('/bookings', async (req, res) => {
