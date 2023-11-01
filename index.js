@@ -1,5 +1,7 @@
 const express = require('express')
 const cors = require('cors')
+const jwt = require('jsonwebtoken');
+const cookiesParser = require('cookie-parser')
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config()
 const app = express()
@@ -8,8 +10,40 @@ const port = process.env.PORT || 5000;
 
 // middle ware
 
-app.use(cors());
+app.use(cors({
+    origin: [
+        'http://localhost:5173'
+    ],
+    credentials: true
+}));
 app.use(express.json())
+app.use(cookiesParser())
+
+// custom middle ware
+
+const logger = async (req, res, next) => {
+    console.log('called:', req.host, req.originalUrl);
+    next()
+}
+
+
+const veryFyToken = async (req, res, next) => {
+    const token = req.cookies?.token
+    // console.log('custom middle ware', token);
+    if (!token) {
+        return res.status(401).send({ massage: 'Authorized access' })
+    }
+    jwt.verify(token, process.env.ACCESS_SECRET_TOKEN, (err, decoded) => {
+        // console.log(decoded.foo)
+        if (err) {
+            return res.status(401).send({ massage: 'Authorized access' })
+        }
+        req.user = decoded
+    });
+    next()
+}
+
+
 
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.vfr78tp.mongodb.net/?retryWrites=true&w=majority`;
@@ -32,6 +66,29 @@ async function run() {
 
         const bookingCollection = client.db("carDoctor").collection("booking")
 
+
+        // auth related api
+        // console.log(process.env.ACCESS_SECRET_TOKEN)
+        app.post('/jwt', async (req, res) => {
+            const user = req.body;
+            // console.log('user for token', user)
+            const token = jwt.sign(user, process.env.ACCESS_SECRET_TOKEN, { expiresIn: '1h' })
+
+            res.cookie('token', token, {
+                httpOnly: true,
+                secure: true,
+                sameSite: 'none'
+            }).send({ success: true })
+        })
+
+
+        app.post('/login', async (req, res) => {
+            const user = req.body;
+            // console.log('logout user', user)
+            res.clearCookie('token', { maxAge: 0 }).send({ success: true })
+        })
+
+
         // our services stor
         app.get('/services', async (req, res) => {
             const cursor = servicesCollection.find()
@@ -52,8 +109,15 @@ async function run() {
 
         // booking store
 
-        app.get('/bookings', async (req, res) => {
-            console.log(req.query.email)
+        app.get('/bookings', veryFyToken, async (req, res) => {
+
+
+            // console.log('token oner info', req.user?.email)
+
+            if (req.user?.email !== req.query.email) {
+                return res.status(403).send({ massage: 'Forbidden access' })
+            }
+
             let query = {}
 
             if (req.query?.email) {
@@ -77,7 +141,9 @@ async function run() {
             const updateBooking = req.body;
             // console.log(updateBooking)
             const updateDoc = {
-                $set: { status: updateBooking.status }
+                $set: {
+                    status: updateBooking.status
+                }
             }
             const result = await bookingCollection.updateOne(filter, updateDoc)
             res.send(result)
